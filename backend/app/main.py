@@ -9,7 +9,8 @@ from pydantic import BaseModel, ValidationError
 from .ai_service import analyze_incident
 from .schemas import IncidentAnalysis
 
-load_dotenv()
+from pathlib import Path
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 logging.basicConfig(
     format="%(asctime)s  %(levelname)-8s  %(message)s",

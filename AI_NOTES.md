@@ -31,3 +31,45 @@
 - Observation: AI caught its own mistake — but only because it was
   still "thinking" about the same file. Would it have caught it if
   the error only appeared at runtime?
+
+
+  ### Phase 1 — First real AI output (checkout failure scenario)
+
+GOOD:
+- 16 facts extracted, all traceable to input — no hallucinations spotted
+- Confidence scores felt calibrated (62/45/22/18%) not just round numbers
+- Hypothesis 3 (external factor, 18%) actively argues against the 
+  obvious answer — exactly the critical thinking the brief requires
+- Blame attribution bias (Reasoning Risk 5) was sophisticated — 
+  flagged systemic/process issues not just code bugs
+
+CRITICAL OBSERVATIONS:
+- Summary says "resolved by rolling back" — describes the fix, 
+  not the cause. Slightly misleading framing.
+- Assumption 5 ("async email interacts with database in some capacity")
+  — the AI assumed this without any evidence in the input. 
+  This is the AI filling gaps with plausible-sounding logic.
+  Classic hallucination-adjacent behavior.
+- All 4 hypotheses point to v2.3.1 as the cause. The AI never 
+  seriously considered that the deployment timing was coincidental.
+  = Temporal proximity bias in the AI itself, even though it flagged 
+  this bias in the reasoning risks section. Ironic.
+
+BIAS I NOTICED IN MYSELF:
+- I found the output convincing because it sounded professional
+  and detailed. That's automation bias. I didn't check whether
+  Assumption 5 was supported by the input until looking carefully.
+
+  ### Phase 3 — First full UI test
+- Input: 3 lines of raw incident text
+- Output: 8 facts, 6 assumptions, 5 timeline events, 
+  4 hypotheses, 5 biases, 6 actions, 6 open questions
+- Tool never claimed a definitive root cause ✓
+- Hypothesis 4 (external factor, 15%) actively argues 
+  against the obvious answer ✓
+- Assumption 4 ("traffic was normal") — AI invented this 
+  without any evidence in the input. Not hallucination 
+  exactly, but the AI filling gaps. Worth discussing.
+- The tool flagged temporal proximity bias but hypothesis #1 
+  still leads with deployment as the cause. AI identified 
+  its own potential bias but didn't fully correct for it.
