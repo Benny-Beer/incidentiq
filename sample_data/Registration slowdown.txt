@@ -1,0 +1,76 @@
+INCIDENT REPORT
+Date: 2024-09-02 (First day of semester registration)
+Reported by: David Okafor, Systems Administrator
+Severity: P1
+Duration: 2 hours 17 minutes (08:00 UTC - 10:17 UTC)
+
+INCIDENT SUMMARY
+University course registration portal became severely degraded at 08:00 UTC,
+the exact moment registration opened for 12,400 students. Page load times
+exceeded 45 seconds. Estimated 3,800 students unable to register for preferred
+courses during the degraded window. Some students missed course enrollment
+deadlines entirely.
+
+SYSTEM BACKGROUND
+- Registration portal handles ~400 concurrent users normally
+- Peak registration day expected 12,400 students over 4-hour window
+- New feature deployed 3 days prior: real-time seat availability counter
+- Database upgraded from PostgreSQL 13 to PostgreSQL 15 two weeks ago
+- Last year registration ran without issues (different system version)
+
+TIMELINE
+07:45 UTC - Final system checks completed. All services green.
+07:58 UTC - Registration portal opened 2 minutes early for testing
+08:00 UTC - Registration officially opened. Student traffic began immediately.
+08:01 UTC - Page load times jumped from 0.8s to 12s
+08:03 UTC - David Okafor received automated alert: response time exceeded 5s threshold
+08:04 UTC - Load balancer showing 847 concurrent connections (normal peak: 400)
+08:06 UTC - Database CPU at 94% (normal: 20-30%)
+08:07 UTC - Real-time seat counter queries identified: 1 query per student per page load
+08:09 UTC - Application server memory at 87% (normal: 45%)
+08:11 UTC - Decision made NOT to take system offline — too many students waiting
+08:14 UTC - Attempted to scale application servers from 4 to 8 instances
+08:19 UTC - Scaling complete. No improvement in response times.
+08:22 UTC - Database slow query log shows seat availability query taking avg 4.2s
+08:24 UTC - Seat availability query doing full table scan on enrollments table (8.2M rows)
+08:26 UTC - Index on enrollments.course_id missing — was present in PostgreSQL 13, not migrated
+08:31 UTC - Emergency index creation started (online, non-blocking)
+08:44 UTC - Index creation complete
+08:45 UTC - Database CPU dropped to 31%. Page load times dropped to 1.8s
+08:47 UTC - System still slow — connection pool exhausted (200/200 connections in use)
+08:52 UTC - Connection pool limit increased from 200 to 400
+08:58 UTC - Page load times dropped to 0.9s. System recovering.
+10:17 UTC - Final stragglers cleared. Incident declared resolved.
+
+ERROR AND WARNING LOGS
+[08:00:44] WARN  AppServer: Response time exceeded 5000ms threshold - endpoint=/registration/courses
+[08:01:02] WARN  AppServer: Response time exceeded 5000ms threshold - endpoint=/registration/courses
+[08:01:33] ERROR Database: Query timeout after 30000ms - query_id=seat_availability_check
+[08:02:11] WARN  AppServer: Connection pool utilization 78% (156/200)
+[08:03:04] ERROR Database: Query timeout after 30000ms - query_id=seat_availability_check
+[08:03:55] WARN  AppServer: Connection pool utilization 91% (182/200)
+[08:04:22] ERROR AppServer: Request queue depth 127 - system under heavy load
+[08:05:01] ERROR Database: Query timeout after 30000ms - query_id=seat_availability_check
+[08:05:33] FATAL AppServer: Connection pool exhausted (200/200) - requests being queued
+[08:06:44] ERROR AppServer: Request rejected - queue capacity exceeded - student_id=STU-28821
+[08:07:12] ERROR Database: Query timeout after 30000ms - query_id=seat_availability_check
+[08:08:03] WARN  LoadBalancer: Upstream response time 18432ms - marking server app-02 as degraded
+[08:09:44] ERROR AppServer: Out of memory warning - heap at 87% capacity
+[08:22:01] WARN  Database: Slow query detected (4218ms): SELECT COUNT(*) FROM enrollments WHERE course_id=? AND semester=?
+[08:24:33] WARN  Database: Sequential scan on enrollments (8,200,441 rows) - missing index suspected
+
+ADDITIONAL OBSERVATIONS
+- Real-time seat counter feature queries database on every page load and every 10 seconds via polling
+- Feature was tested with 50 concurrent users in staging — not tested at 800+ concurrent users
+- PostgreSQL 15 migration checklist did not include index verification step
+- Scaling from 4 to 8 application servers had no effect because bottleneck was database, not application layer
+- Students reported seeing "Your session has expired" errors — likely caused by app server memory pressure
+- Financial aid students had priority registration window 08:00-08:30 UTC — most affected group
+- Last year's system used cached seat counts updated every 60 seconds, not real-time queries
+- Network bandwidth was normal throughout incident
+- 23 students submitted formal complaints about missed course enrollment
+
+WHAT WAS NOT INVESTIGATED
+- Whether PostgreSQL 15 query planner differences contributed independently of missing index
+- Whether application server memory pressure caused additional issues beyond slow responses
+- Whether the seat counter polling (every 10s per student) amplified the query load

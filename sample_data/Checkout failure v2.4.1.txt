@@ -1,0 +1,68 @@
+INCIDENT REPORT
+Date: 2024-03-15
+Reported by: On-call Engineer Marcus Webb (SRE Team)
+Severity: P1
+Duration: 41 minutes (15:12 UTC - 15:53 UTC)
+
+INCIDENT SUMMARY
+Checkout service experienced elevated error rates beginning at 15:12 UTC.
+4,203 transactions failed. Estimated revenue loss: $63,000.
+Service recovered after rollback of checkout-service v2.4.1 to v2.4.0.
+
+DEPLOYMENT HISTORY
+15:00 UTC - checkout-service v2.4.1 deployed via CI/CD pipeline (automated)
+            Release notes: new promo code validation engine, updated payment
+            gateway SDK from v3.1 to v3.2, minor UI copy changes
+
+TIMELINE
+15:00 UTC - Deployment of checkout-service v2.4.1 completed. CI/CD reported success.
+15:04 UTC - Automated smoke tests passed (3/3 test cases green)
+15:12 UTC - PagerDuty alert: checkout error rate exceeded 8% threshold
+15:13 UTC - Marcus Webb acknowledged alert, began investigation
+15:15 UTC - Error rate at 34% and climbing. Users reporting "Payment failed" on checkout
+15:17 UTC - Marcus checks Datadog APM: high latency on /api/checkout/confirm endpoint (avg 8.2s, normal 0.4s)
+15:19 UTC - Database connections: 31/200 (normal range). DB CPU: 22% (normal)
+15:21 UTC - Checked payment gateway status page: no incidents reported
+15:22 UTC - Redis cache hit rate dropped from 94% to 12% — flagged as suspicious
+15:24 UTC - Checked CDN logs: static assets loading fine, no issues
+15:26 UTC - Engineer notices promo code validation added in v2.4.1
+15:28 UTC - Promo code validation making external API call to discount-service on every checkout
+15:29 UTC - discount-service response time: 7.8s average (SLA is 200ms)
+15:31 UTC - discount-service team contacted — they deployed a new ML-based validation model at 14:55 UTC
+15:33 UTC - Root cause suspected: discount-service latency causing checkout timeouts
+15:35 UTC - Decision: rollback checkout-service to v2.4.0 while discount-service is fixed separately
+15:42 UTC - Rollback initiated
+15:53 UTC - Error rate returned to 0.3%. Checkout latency back to normal (0.38s avg)
+16:05 UTC - Incident declared resolved
+
+ERROR LOGS (sample 15:12 - 15:35 UTC)
+[15:12:03] ERROR CheckoutService: Payment confirmation timeout after 8000ms - order_id=ORD-94821
+[15:12:11] ERROR CheckoutService: Payment confirmation timeout after 8000ms - order_id=ORD-94822
+[15:12:44] WARN  PromoValidator: External validation call exceeded 5000ms threshold - promo_code=SAVE10
+[15:13:02] ERROR CheckoutService: Payment confirmation timeout after 8000ms - order_id=ORD-94831
+[15:13:18] WARN  PromoValidator: External validation call exceeded 5000ms threshold - promo_code=NONE
+[15:14:55] ERROR RedisCache: Cache miss rate elevated - current: 87% miss (normal: 6% miss)
+[15:15:33] ERROR CheckoutService: Payment confirmation timeout after 8000ms - order_id=ORD-94902
+[15:16:01] WARN  PromoValidator: External validation call exceeded 5000ms threshold - promo_code=NONE
+[15:17:44] ERROR ThreadPool: Worker utilization at 91% (182/200 threads)
+[15:19:22] ERROR CheckoutService: Payment confirmation timeout after 8000ms - order_id=ORD-95001
+[15:21:03] WARN  PaymentGatewaySDK: Retry attempt 2/3 for transaction txn_992211
+[15:22:47] ERROR ThreadPool: Worker utilization at 98% (196/200 threads)
+[15:24:11] FATAL CheckoutService: Request queue depth exceeded 500 - dropping new requests
+[15:26:33] ERROR CheckoutService: Payment confirmation timeout after 8000ms - order_id=ORD-95201
+
+ADDITIONAL OBSERVATIONS
+- Promo code validation in v2.4.1 calls discount-service on EVERY checkout, even when no promo code entered
+- Previous version (v2.4.0) only called discount-service when a promo code field was non-empty
+- Redis cache miss rate spike began at 15:14 UTC — 2 minutes after error rate spike (possibly a symptom not a cause)
+- Payment gateway SDK updated from v3.1 to v3.2 in this release (changelog: minor retry logic changes)
+- discount-service ML model deployment at 14:55 UTC not communicated to checkout team
+- 3 of 4,203 failed transactions were charged but not fulfilled (requires manual reconciliation)
+- Payment service, inventory service, user-auth service: no errors during incident window
+- Traffic volume during incident: within normal Friday afternoon range
+- Smoke tests at 15:04 UTC passed because test environment does not call real discount-service
+
+WHAT WAS NOT INVESTIGATED
+- Whether payment gateway SDK v3.2 retry logic contributed to thread pool exhaustion
+- Whether Redis cache degradation was cause or effect
+- Why discount-service SLA breach was not alerted before it caused a customer-facing incident

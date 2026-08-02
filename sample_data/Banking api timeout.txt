@@ -1,0 +1,84 @@
+INCIDENT REPORT
+Date: 2024-11-08
+Reported by: Priya Nair, Senior Platform Engineer
+Severity: P1 — Regulatory notification required
+Duration: 58 minutes (11:03 UTC - 12:01 UTC)
+
+INCIDENT SUMMARY
+Banking transfer API became unavailable for 58 minutes. Customers unable to
+initiate domestic or international transfers. 1,847 transfer requests failed.
+No financial data lost — all failed transactions rolled back cleanly.
+Regulatory body notified per compliance requirements (>30 min outage threshold).
+Incident caused by TLS certificate configuration change that broke mutual
+authentication with the core banking system.
+
+SYSTEM BACKGROUND
+- Transfer API handles ~200 requests/minute during business hours
+- Communicates with CoreBanking system via mutual TLS (mTLS)
+- mTLS requires both client and server to present valid certificates
+- Certificate rotation scheduled quarterly — last rotation: 3 months ago
+- Config change deployed at 10:55 UTC: updated cipher suite list per new
+  security policy (removed 3DES, added ChaCha20-Poly1305)
+
+TIMELINE
+10:55 UTC - Security config change deployed: updated TLS cipher suite list
+10:55 UTC - Automated deployment validation: PASSED
+10:58 UTC - Canary health check: PASSED (checked HTTP /health endpoint only)
+11:03 UTC - First customer transfer failure reported via support chat
+11:04 UTC - PagerDuty alert: transfer API error rate exceeded 15% threshold
+11:05 UTC - Priya Nair acknowledged alert
+11:06 UTC - Error rate at 100% — all transfer requests failing
+11:07 UTC - Checked CoreBanking system status: green, no issues reported
+11:08 UTC - Checked transfer API logs: TLS handshake failures on every request
+11:09 UTC - Initial hypothesis: CoreBanking system certificate expired
+11:12 UTC - Verified CoreBanking certificate: valid until 2025-03-01 (not expired)
+11:14 UTC - Checked transfer API certificate: valid until 2025-01-15 (not expired)
+11:16 UTC - Security team contacted about cipher suite change at 10:55 UTC
+11:18 UTC - Security team confirms: ChaCha20-Poly1305 not supported by CoreBanking v4.1
+11:20 UTC - CoreBanking v4.1 only supports: AES-256-GCM, AES-128-GCM (older cipher suites)
+11:22 UTC - TLS negotiation failing because no mutually supported cipher suite
+11:25 UTC - Decision: rollback cipher suite config to previous list
+11:31 UTC - Config rollback deployed
+11:34 UTC - TLS handshakes succeeding. Transfer requests processing.
+11:38 UTC - Error rate dropped to 0%
+12:01 UTC - Post-incident monitoring period complete. Incident declared resolved.
+12:15 UTC - Regulatory notification filed (58-minute outage exceeded 30-minute threshold)
+
+ERROR LOGS (sample 11:03 - 11:34 UTC)
+[11:03:02] ERROR TransferAPI: TLS handshake failed - peer: corebanking.internal:8443
+[11:03:02] ERROR TransferAPI: javax.net.ssl.SSLHandshakeException: no cipher suites in common
+[11:03:15] ERROR TransferAPI: TLS handshake failed - peer: corebanking.internal:8443
+[11:03:15] ERROR TransferAPI: javax.net.ssl.SSLHandshakeException: no cipher suites in common
+[11:04:01] WARN  TransferAPI: Circuit breaker OPEN - CoreBanking connection failing consistently
+[11:04:01] ERROR TransferAPI: All transfer requests rejected - circuit breaker open
+[11:05:33] ERROR TransferAPI: TLS handshake failed - peer: corebanking.internal:8443
+[11:06:02] ERROR TransferAPI: javax.net.ssl.SSLHandshakeException: no cipher suites in common
+[11:08:44] WARN  TransferAPI: Retry attempt 3/3 failed for transfer_id=TXN-44821
+[11:09:11] ERROR TransferAPI: TLS handshake failed - peer: corebanking.internal:8443
+[11:11:33] INFO  TransferAPI: Certificate check - transfer-api.crt expires 2025-01-15 [VALID]
+[11:13:02] INFO  TransferAPI: Certificate check - corebanking.crt expires 2025-03-01 [VALID]
+[11:15:44] ERROR TransferAPI: TLS handshake failed - peer: corebanking.internal:8443
+[11:15:44] ERROR TransferAPI: javax.net.ssl.SSLHandshakeException: no cipher suites in common
+[11:31:44] INFO  TransferAPI: Config reloaded - cipher suite list updated
+[11:32:01] INFO  TransferAPI: TLS handshake succeeded - peer: corebanking.internal:8443
+[11:32:01] INFO  TransferAPI: Circuit breaker CLOSED - CoreBanking connection restored
+[11:34:22] INFO  TransferAPI: Transfer processing resumed - queue depth: 0
+
+ADDITIONAL OBSERVATIONS
+- Cipher suite change was required by new internal security policy (compliance deadline: end of month)
+- Security policy change was reviewed and approved by CISO office
+- CoreBanking system version compatibility was not checked before cipher suite update
+- CoreBanking v4.1 is scheduled for upgrade to v5.0 in Q1 2025 — v5.0 supports ChaCha20-Poly1305
+- Canary health check at 10:58 UTC passed because /health endpoint does not make CoreBanking calls
+- Circuit breaker opened at 11:04 UTC, preventing retry storms — worked as designed
+- All 1,847 failed transactions rolled back cleanly — no partial transfers or data corruption
+- International transfer queue was separately paused by operations team at 11:10 UTC as precaution
+- A separate unrelated DNS warning appeared in logs at 11:19 UTC for an internal monitoring service
+- Customer support received 203 inbound contacts during the incident window
+- Identical cipher suite issue was flagged in a dependency review 6 months ago but not actioned
+
+WHAT WAS NOT INVESTIGATED
+- Whether the DNS warning at 11:19 UTC was related or purely coincidental
+- Whether the international transfer queue pause by operations caused any additional customer impact
+- Whether the 8-minute gap between config change (10:55) and first failure (11:03) indicates
+  something other than immediate cipher suite incompatibility
